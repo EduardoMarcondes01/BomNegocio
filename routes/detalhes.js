@@ -1,5 +1,5 @@
 ﻿const express = require('express');
-// CORRIGIR: supabase, { supabaseAdmin } from '../supabaseClient.js';
+const { supabase } = require('../supabaseClient.js');
 const { verifyToken } = require('../authMiddleware.js');
 
 const router = express.Router();
