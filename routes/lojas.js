@@ -1,5 +1,5 @@
 const express = require('express');
-const supabase = require('../supabaseClient.js');
+const { supabase } = require('../supabaseClient.js');
 const { verifyToken } = require('../authMiddleware.js');
 
 const router = express.Router();
