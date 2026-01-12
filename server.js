@@ -33,24 +33,31 @@ const detalhesOfertaRouter = require('./routes/detalhes-oferta.js');
 
 const app = express();
 
+// ⭐⭐ FIX PARA VERCEL - ESSENCIAL ⭐⭐
+app.set('trust proxy', 1);
+
 // 1. Configuração de Segurança Básica
 app.use(helmet());
 app.disable('x-powered-by');
 
-// 2. Limitação de Taxa (Rate Limiting)
+// 2. Limitação de Taxa (Rate Limiting) - Corrigido para Vercel
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: 100, // limite de 100 requisições por IP
-  message: 'Muitas requisições deste IP, tente novamente mais tarde'
+  message: 'Muitas requisições deste IP, tente novamente mais tarde',
+  standardHeaders: true, // Retorna info de rate limit nos headers
+  legacyHeaders: false, // Desabilita headers legados
+  trustProxy: true // ⭐ IMPORTANTE para Vercel
 });
 app.use(limiter);
 
-// 3. Configuração de CORS
+// 3. Configuração de CORS (Versão mais permissiva)
 app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  origin: '*', // Permite todas origens (em produção, especifique seu domínio)
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
+  credentials: true,
+  exposedHeaders: ['Content-Range', 'X-Content-Range']
 }));
 
 // Middleware para JSON (para todas as rotas exceto cadastro com multipart)
@@ -66,6 +73,24 @@ app.use((req, res, next) => {
     return next();
   }
   express.urlencoded({ extended: true })(req, res, next);
+});
+
+// Rota raiz simples
+app.get('/', (req, res) => {
+  res.json({
+    message: '🚀 API BomNegocio Online!',
+    status: 'operational',
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+    documentation: '/api/health',
+    endpoints: {
+      auth: '/api/auth/login',
+      perfil: '/api/perfil',
+      produtos: '/api/data/produtos',
+      lojas: '/api/lojas',
+      health: '/api/health'
+    }
+  });
 });
 
 // Rotas principais (com proteção onde necessário)
@@ -102,11 +127,14 @@ app.get('/api/health', (req, res) => {
     status: 'healthy',
     timestamp: new Date().toISOString(),
     version: '1.0.0',
+    environment: process.env.NODE_ENV || 'production',
+    vercel: process.env.VERCEL === '1',
     routes: {
       perfil: '/api/perfil',
       editarPerfil: '/api/editar-perfil',
       visualizarLoja: '/api/visualizar-loja',
-      health: '/api/health'
+      health: '/api/health',
+      produtos: '/api/data/produtos'
     }
   });
 });
@@ -118,13 +146,16 @@ app.use('*', (req, res) => {
     error: 'Rota não encontrada',
     requestedUrl: req.originalUrl,
     method: req.method,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    availableRoutes: ['/', '/api/health', '/api/auth/login', '/api/perfil']
   });
 });
 
 // Tratamento de Erros Aprimorado
 app.use((err, req, res, next) => {
-  res.status(500).json({ 
+  console.error('❌ Erro no servidor:', err);
+  
+  res.status(err.status || 500).json({ 
     success: false,
     error: 'Erro interno do servidor',
     message: process.env.NODE_ENV === 'development' ? err.message : 'Ocorreu um erro',
@@ -147,11 +178,13 @@ if (!isVercel) {
     console.log(`🚀 Servidor rodando na porta ${PORT}`);
     console.log(`🌐 Acesse: http://localhost:${PORT}`);
     console.log(`📁 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`⚡ Trust Proxy: ${app.get('trust proxy')}`);
   });
+} else {
+  console.log('✅ Configurado para produção no Vercel');
+  console.log(`⚡ Trust Proxy: ${app.get('trust proxy')}`);
 }
 
 // Exportar app PARA AMBAS situações (Vercel E local)
 // A Vercel precisa desta exportação, localmente também funciona
-console.log(isVercel ? '✅ Configurado para Vercel' : '✅ Configurado para desenvolvimento local');
 module.exports = app;
-
