@@ -66,71 +66,173 @@ router.get('/favoritos-count/:userId', profileLimiter, verifyToken, async (req, 
 });
 
 router.delete('/produtos/:produtoId', profileLimiter, verifyToken, async (req, res) => {
+  console.log('🗑️ [DELETE PRODUTO] Iniciando deleção...');
+  console.log('🔍 Parâmetros:', req.params);
+  console.log('🔍 req.user.id:', req.user?.id);
+  console.log('🔍 Headers Auth:', req.headers.authorization?.substring(0, 30) + '...');
+  
   try {
     const { produtoId } = req.params;
-    const userId = req.user.id;
+    const userId = req.user?.id;
 
-    const { data: produto, error: produtoError } = await supabaseAdmin
-      .from('produtos')
-      .select('usuario_id')
-      .eq('id', produtoId)
-      .single();
+    console.log('📊 Dados recebidos:');
+    console.log('   - produtoId:', produtoId);
+    console.log('   - userId:', userId);
 
-    if (produtoError || !produto) {
-      return res.status(404).json({
+    if (!produtoId) {
+      console.log('⚠️ produtoId não fornecido');
+      return res.status(400).json({
         success: false,
-        error: 'Produto não encontrado'
+        error: 'ID do produto é obrigatório'
       });
     }
 
+    if (!userId) {
+      console.log('⚠️ userId não encontrado (não autenticado?)');
+      return res.status(401).json({
+        success: false,
+        error: 'Usuário não autenticado'
+      });
+    }
+
+    console.log('🔗 [1] Verificando existência do produto...');
+    const { data: produto, error: produtoError } = await supabaseAdmin
+      .from('produtos')
+      .select('id, usuario_id, nome, categoria')
+      .eq('id', produtoId)
+      .single();
+
+    console.log('📊 Resultado verificação produto:');
+    console.log('   - Erro?', !!produtoError);
+    console.log('   - Código erro:', produtoError?.code);
+    console.log('   - Mensagem erro:', produtoError?.message);
+    console.log('   - Produto encontrado?', !!produto);
+    console.log('   - Dados produto:', produto);
+
+    if (produtoError || !produto) {
+      console.log('❌ Produto não encontrado ou erro na consulta');
+      return res.status(404).json({
+        success: false,
+        error: 'Produto não encontrado',
+        debug: process.env.NODE_ENV === 'development' ? produtoError?.message : undefined
+      });
+    }
+
+    console.log('🔍 Verificando permissões...');
+    console.log('   - Dono do produto:', produto.usuario_id);
+    console.log('   - Usuário atual:', userId);
+    console.log('   - É o dono?', produto.usuario_id === userId);
+
     if (produto.usuario_id !== userId) {
+      console.log('⛔ Permissão negada - usuário não é dono do produto');
       return res.status(403).json({
         success: false,
         error: 'Permissão negada para deletar este produto'
       });
     }
 
-    const { data: servicoExistente } = await supabaseAdmin
+    console.log('🔗 [2] Verificando se existe na tabela serviços...');
+    const { data: servicoExistente, error: servicoError } = await supabaseAdmin
       .from('servicos')
-      .select('id')
+      .select('id, nome, categoria')
       .eq('produto_id', produtoId)
-      .single();
+      .maybeSingle();
+
+    console.log('📊 Resultado verificação serviços:');
+    console.log('   - Erro?', !!servicoError);
+    console.log('   - Serviço encontrado?', !!servicoExistente);
+    console.log('   - Dados serviço:', servicoExistente);
 
     const existeNaTabelaServicos = !!servicoExistente;
+    console.log('   - Existe na tabela serviços?', existeNaTabelaServicos);
 
     if (existeNaTabelaServicos) {
-      await supabaseAdmin
+      console.log('🔗 [3] Deletando da tabela serviços...');
+      const { error: deleteServicoError } = await supabaseAdmin
         .from('servicos')
         .delete()
         .eq('produto_id', produtoId);
+
+      console.log('📊 Resultado deleção serviço:');
+      console.log('   - Erro?', !!deleteServicoError);
+      console.log('   - Mensagem:', deleteServicoError?.message);
+
+      if (deleteServicoError) {
+        console.error('❌ Erro ao deletar serviço:', deleteServicoError);
+        // Continuar mesmo com erro? Decida conforme sua lógica
+      } else {
+        console.log('✅ Serviço deletado com sucesso');
+      }
     }
 
-    await supabaseAdmin
+    console.log('🔗 [4] Deletando favoritos associados...');
+    const { error: deleteFavoritosError } = await supabaseAdmin
       .from('favoritos')
       .delete()
       .eq('produto_id', produtoId);
 
+    console.log('📊 Resultado deleção favoritos:');
+    console.log('   - Erro?', !!deleteFavoritosError);
+    console.log('   - Mensagem:', deleteFavoritosError?.message);
+
+    if (deleteFavoritosError) {
+      console.error('❌ Erro ao deletar favoritos:', deleteFavoritosError);
+      // Continuar mesmo com erro? Decida conforme sua lógica
+    } else {
+      console.log('✅ Favoritos deletados com sucesso');
+    }
+
+    console.log('🔗 [5] Deletando produto principal...');
     const { error: produtoDeleteError } = await supabaseAdmin
       .from('produtos')
       .delete()
       .eq('id', produtoId);
 
+    console.log('📊 Resultado deleção produto:');
+    console.log('   - Erro?', !!produtoDeleteError);
+    console.log('   - Código:', produtoDeleteError?.code);
+    console.log('   - Mensagem:', produtoDeleteError?.message);
+    console.log('   - Detalhes:', produtoDeleteError?.details);
+
     if (produtoDeleteError) {
+      console.error('❌ Erro ao deletar produto:', produtoDeleteError);
       return res.status(500).json({
         success: false,
-        error: 'Erro ao deletar produto'
+        error: 'Erro ao deletar produto',
+        debug: process.env.NODE_ENV === 'development' ? {
+          message: produtoDeleteError.message,
+          code: produtoDeleteError.code,
+          details: produtoDeleteError.details
+        } : undefined
       });
     }
 
+    console.log('✅ Deleção completada com sucesso!');
+    console.log('📝 Tipo deletado:', existeNaTabelaServicos ? 'Serviço' : 'Produto');
+    console.log('📝 Produto ID:', produtoId);
+    console.log('📝 Usuário:', userId);
+
     res.status(200).json({
       success: true,
-      message: existeNaTabelaServicos ? 'Serviço deletado com sucesso' : 'Produto deletado com sucesso'
+      message: existeNaTabelaServicos ? 'Serviço deletado com sucesso' : 'Produto deletado com sucesso',
+      produtoId: produtoId,
+      tipo: existeNaTabelaServicos ? 'servico' : 'produto'
     });
 
   } catch (error) {
+    console.error('💥 ERRO CATCH em DELETE /produtos/:produtoId:');
+    console.error('   - Mensagem:', error.message);
+    console.error('   - Stack:', error.stack);
+    console.error('   - Tipo:', error.name);
+    console.error('   - Code:', error.code);
+    
     res.status(500).json({
       success: false,
-      error: 'Erro interno ao deletar produto'
+      error: 'Erro interno ao deletar produto',
+      debug: process.env.NODE_ENV === 'development' ? {
+        message: error.message,
+        stack: error.stack
+      } : undefined
     });
   }
 });
