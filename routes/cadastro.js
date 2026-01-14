@@ -396,8 +396,7 @@ router.post('/', upload.single('foto_perfil'), handleMulterError, async (req, re
         email, 
         imagem_url, 
         cidade,
-        email_verified,
-        email_validation_method
+        email_verified
       `)
       .single();
 
