@@ -380,10 +380,6 @@ router.post('/', upload.single('foto_perfil'), handleMulterError, async (req, re
       // ✅ Email já verificado pela validação robusta
       email_verified: true,
       email_verified_at: new Date().toISOString(),
-      email_validation_method: 'robust_validation',
-      email_provider: userData.email.split('@')[1],
-      preferred_language: 'pt-BR',
-      timezone: 'America/Sao_Paulo',
       created_at: new Date().toISOString()
     };
 
