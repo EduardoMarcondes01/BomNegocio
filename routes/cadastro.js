@@ -382,13 +382,8 @@ router.post('/', upload.single('foto_perfil'), handleMulterError, async (req, re
       aceitou_termos: true,
       imagem_url,
       email_verified: true,  // ✅ Verificado pela validação robusta
-      email_validation_method: validacaoEmail.nivel,
-      email_confidence_score: validacaoEmail.detalhes?.score_confianca || 0,
-      email_provider: validacaoEmail.detalhes?.dominio || '',
-      registration_ip: req.ip,
-      user_agent: req.headers['user-agent'] || '',
-      created_at: new Date().toISOString(),
-      last_active: new Date().toISOString()
+      created_at: new Date().toISOString()
+
     };
 
     console.log('💾 Salvando usuário no banco...');
