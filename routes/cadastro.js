@@ -6,47 +6,8 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const dns = require('dns').promises;
 
-console.log('=== CADASTRO COM VALIDAÇÃO ROBUSTA DE EMAIL ===');
-
-// Configuração do Multer
-const storage = multer.memoryStorage();
-const fileFilter = (req, file, cb) => {
-  const filetypes = /jpeg|jpg|png|gif/;
-  const mimetype = filetypes.test(file.mimetype);
-  const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-
-  if (mimetype && extname) {
-    return cb(null, true);
-  }
-  cb(new Error('Apenas imagens são permitidas'));
-};
-
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024, files: 1 }
-});
-
-const handleMulterError = (err, req, res, next) => {
-  if (err instanceof multer.MulterError) {
-    return res.status(400).json({
-      success: false,
-      error: 'Erro no upload da imagem'
-    });
-  } else if (err) {
-    return res.status(400).json({
-      success: false,
-      error: err.message
-    });
-  }
-  next();
-};
-
-const router = express.Router();
-
 // 🔥 LISTA DE DOMÍNIOS BLOQUEADOS (emails temporários/fake)
 const DOMINIOS_BLOQUEADOS = [
-  // Serviços de email temporário
   'yopmail.com', 'yopmail.fr', 'yopmail.net',
   'mailinator.com', 'mailinator.net', 'mailinator.org',
   'guerrillamail.com', 'guerrillamail.net', 'guerrillamail.org',
@@ -57,12 +18,8 @@ const DOMINIOS_BLOQUEADOS = [
   'throwawaymail.com', 'trashmail.com',
   'fakeinbox.com', 'getairmail.com',
   'mintemail.com', 'jetable.org',
-  
-  // Domínios comuns de spam
   'example.com', 'test.com', 'teste.com', 'fakemail.com',
   'dummy.com', 'noemail.com', 'no-reply.com',
-  
-  // Domínios inválidos/não-existentes
   'localhost.com', '127.0.0.1.com', 'invalid.com'
 ];
 
@@ -78,21 +35,18 @@ const PROVEDORES_CONFIAVEIS = [
   'mail.com', 'gmx.com', 'gmx.net'
 ];
 
-// 🔥 FUNÇÃO: Verificar MX records do domínio (se tem servidor de email)
+// 🔥 FUNÇÃO: Verificar MX records do domínio
 async function verificarMXRecords(dominio) {
   try {
     const records = await dns.resolveMx(dominio);
     return records.length > 0;
   } catch (error) {
-    // Se não encontrar MX records, domínio não existe ou não aceita email
     return false;
   }
 }
 
-// 🔥 FUNÇÃO: Validação SUPER ROBUSTA de email
+// 🔥 FUNÇÃO: Validação robusta de email
 async function validarEmailRobusto(email) {
-  console.log(`🔍 Validando email: ${email}`);
-  
   const emailLower = email.trim().toLowerCase();
   
   // 1. Verificar formato básico
@@ -148,7 +102,7 @@ async function validarEmailRobusto(email) {
     };
   }
   
-  // 5. Verificar se domínio tem extensão válida
+  // 5. Verificar extensão válida
   const extensoesValidas = [
     '.com', '.com.br', '.br', '.org', '.net', '.edu', '.gov',
     '.io', '.dev', '.app', '.me', '.info', '.biz', '.co',
@@ -157,24 +111,19 @@ async function validarEmailRobusto(email) {
   ];
   
   const temExtensaoValida = extensoesValidas.some(ext => dominio.endsWith(ext));
-  if (!temExtensaoValida) {
-    console.log(`⚠️  Domínio com extensão incomum: ${dominio}`);
-    // Não bloqueia, apenas registra
-  }
   
   // 6. Verificar se é provedor confiável
   const provedorConfiavel = PROVEDORES_CONFIAVEIS.includes(dominio);
   
-  // 7. 🔥 VERIFICAR MX RECORDS (se domínio tem servidor de email)
+  // 7. Verificar MX Records
   let mxValido = false;
   try {
     mxValido = await verificarMXRecords(dominio);
-    console.log(`📡 MX Records para ${dominio}: ${mxValido ? 'VÁLIDO' : 'INVÁLIDO'}`);
   } catch (error) {
-    console.log(`⚠️  Não foi possível verificar MX para ${dominio}: ${error.message}`);
+    // Ignora erro na verificação
   }
   
-  // 8. Verificar padrões comuns de emails fake
+  // 8. Verificar padrões de emails fake
   const padroesFake = [
     /^teste?[0-9]*@/i,
     /^exemplo?[0-9]*@/i,
@@ -198,12 +147,7 @@ async function validarEmailRobusto(email) {
     };
   }
   
-  if (pareceFake) {
-    console.log(`⚠️  Email com padrão suspeito: ${emailLower}`);
-    // Não bloqueia, mas registra
-  }
-  
-  // Calcular "score" de confiança
+  // Calcular score de confiança
   let score = 0;
   if (provedorConfiavel) score += 30;
   if (mxValido) score += 40;
@@ -228,26 +172,113 @@ async function validarEmailRobusto(email) {
   };
 }
 
-// 🔥 ROTA PRINCIPAL: Cadastro com validação robusta
+const router = express.Router();
+
+// Configuração do Multer
+const storage = multer.memoryStorage();
+const fileFilter = (req, file, cb) => {
+  const filetypes = /jpeg|jpg|png|gif/;
+  const mimetype = filetypes.test(file.mimetype);
+  const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+
+  if (mimetype && extname) {
+    return cb(null, true);
+  }
+  cb(new Error('Apenas imagens são permitidas (JPEG, JPG, PNG, GIF)'));
+};
+
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+    files: 1
+  }
+});
+
+const handleMulterError = (err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({
+        success: false,
+        error: 'Tamanho máximo de arquivo excedido (5MB)'
+      });
+    }
+    return res.status(400).json({
+      success: false,
+      error: 'Erro no upload da imagem'
+    });
+  } else if (err) {
+    return res.status(400).json({
+      success: false,
+      error: err.message
+    });
+  }
+  next();
+};
+
+const validateInput = (data) => {
+  const errors = {};
+  const requiredFields = [
+    'nome', 'sobrenome', 'email', 'senha', 'idade',
+    'estado', 'cidade', 'bairro', 'rua', 'sexo', 'cep'
+  ];
+
+  requiredFields.forEach(field => {
+    if (!data[field]?.toString().trim()) {
+      errors[field] = `${field.charAt(0).toUpperCase() + field.slice(1)} é obrigatório`;
+    }
+  });
+
+  if (data.email) {
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!emailRegex.test(data.email.trim())) {
+      errors.email = 'Por favor, insira um email válido';
+    }
+  }
+
+  if (data.senha) {
+    if (data.senha.length < 8) {
+      errors.senha = 'A senha deve ter pelo menos 8 caracteres';
+    } else if (!/[A-Z]/.test(data.senha)) {
+      errors.senha = 'A senha deve conter pelo menos uma letra maiúscula';
+    } else if (!/[0-9]/.test(data.senha)) {
+      errors.senha = 'A senha deve conter pelo menos um número';
+    } else if (!/[^A-Za-z0-9]/.test(data.senha)) {
+      errors.senha = 'A senha deve conter pelo menos um caractere especial';
+    }
+  }
+
+  if (data.idade) {
+    const age = parseInt(data.idade, 10);
+    if (isNaN(age)) {
+      errors.idade = 'Idade deve ser um número válido';
+    } else if (age < 13) {
+      errors.idade = 'Você deve ter pelo menos 13 anos para se cadastrar';
+    } else if (age > 120) {
+      errors.idade = 'Por favor, insira uma idade válida';
+    }
+  }
+
+  return {
+    isValid: Object.keys(errors).length === 0,
+    errors
+  };
+};
+
+// 🔥 ROTA PRINCIPAL DE CADASTRO
 router.post('/', upload.single('foto_perfil'), handleMulterError, async (req, res) => {
-  console.log('\n📝 CADASTRO COM VALIDAÇÃO ROBUSTA');
-  console.log('Email:', req.body.email);
-  console.log('IP:', req.ip);
-  
   try {
     const userData = req.body;
     const fotoPerfil = req.file;
 
     // Validação básica dos campos
-    const camposObrigatorios = ['email', 'senha', 'nome', 'idade', 'cidade'];
-    const camposFaltando = camposObrigatorios.filter(campo => !userData[campo]);
-    
-    if (camposFaltando.length > 0) {
+    const { isValid, errors } = validateInput(userData);
+    if (!isValid) {
       return res.status(400).json({
         success: false,
-        error: 'Campos obrigatórios faltando',
-        campos: camposFaltando,
-        message: `Preencha: ${camposFaltando.join(', ')}`
+        errors,
+        message: 'Dados de cadastro inválidos'
       });
     }
 
@@ -255,18 +286,6 @@ router.post('/', upload.single('foto_perfil'), handleMulterError, async (req, re
     const validacaoEmail = await validarEmailRobusto(userData.email);
     
     if (!validacaoEmail.valido) {
-      console.log(`❌ Email rejeitado: ${validacaoEmail.motivo}`);
-      console.log(`   Detalhes: ${validacaoEmail.detalhes}`);
-      
-      // Log para monitoramento
-      console.log('📊 LOG REJEIÇÃO:', {
-        email: userData.email,
-        ip: req.ip,
-        motivo: validacaoEmail.motivo,
-        nivel: validacaoEmail.nivel,
-        timestamp: new Date().toISOString()
-      });
-      
       return res.status(400).json({
         success: false,
         error: validacaoEmail.motivo,
@@ -277,9 +296,6 @@ router.post('/', upload.single('foto_perfil'), handleMulterError, async (req, re
       });
     }
 
-    console.log(`✅ Email aceito! Confiança: ${validacaoEmail.detalhes?.nivel_confianca || 'N/A'}`);
-    console.log('   Detalhes validação:', validacaoEmail.detalhes);
-
     // Verificar se email já existe no banco
     const { data: existingUser, error: checkError } = await supabase
       .from('usuarios')
@@ -288,8 +304,10 @@ router.post('/', upload.single('foto_perfil'), handleMulterError, async (req, re
       .maybeSingle();
 
     if (checkError) {
-      console.error('❌ Erro ao verificar email no banco:', checkError);
-      throw new Error('Erro interno na verificação');
+      return res.status(500).json({
+        success: false,
+        error: 'Erro interno na verificação'
+      });
     }
 
     if (existingUser) {
@@ -303,33 +321,6 @@ router.post('/', upload.single('foto_perfil'), handleMulterError, async (req, re
       });
     }
 
-    // Validar senha robustamente
-    if (userData.senha.length < 8) {
-      return res.status(400).json({
-        success: false,
-        error: 'Senha muito curta',
-        detalhes: 'A senha deve ter pelo menos 8 caracteres'
-      });
-    }
-    
-    // Verificar força da senha
-    const temMaiuscula = /[A-Z]/.test(userData.senha);
-    const temMinuscula = /[a-z]/.test(userData.senha);
-    const temNumero = /[0-9]/.test(userData.senha);
-    
-    if (!temMaiuscula || !temMinuscula || !temNumero) {
-      return res.status(400).json({
-        success: false,
-        error: 'Senha fraca',
-        detalhes: 'Use letras maiúsculas, minúsculas e números',
-        requisitos: {
-          maiuscula: temMaiuscula,
-          minuscula: temMinuscula,
-          numero: temNumero
-        }
-      });
-    }
-
     // Criptografar senha
     const salt = await bcrypt.genSalt(12);
     const hashedPassword = await bcrypt.hash(userData.senha, salt);
@@ -338,7 +329,6 @@ router.post('/', upload.single('foto_perfil'), handleMulterError, async (req, re
     let imagem_url = null;
     if (fotoPerfil) {
       try {
-        console.log('📸 Processando foto de perfil...');
         const fileExt = path.extname(fotoPerfil.originalname).toLowerCase();
         const fileName = `user-${uuidv4()}${fileExt}`;
         const filePath = `profile-pictures/${fileName}`;
@@ -347,46 +337,56 @@ router.post('/', upload.single('foto_perfil'), handleMulterError, async (req, re
           .from('usuarios')
           .upload(filePath, fotoPerfil.buffer, {
             contentType: fotoPerfil.mimetype,
-            cacheControl: '3600'
+            cacheControl: '3600',
+            upsert: false,
+            duplex: 'half'
           });
 
         if (uploadError) {
-          console.error('❌ Erro no upload da foto:', uploadError);
-        } else {
-          const { data: { publicUrl } } = supabaseAdmin
-            .storage
-            .from('usuarios')
-            .getPublicUrl(filePath);
-          imagem_url = publicUrl;
-          console.log('✅ Foto salva:', publicUrl);
+          throw new Error('Falha ao processar imagem de perfil');
         }
-      } catch (error) {
-        console.error('❌ Erro no processamento da foto:', error.message);
+
+        const { data: { publicUrl } } = await supabaseAdmin
+          .storage
+          .from('usuarios')
+          .getPublicUrl(filePath);
+
+        imagem_url = publicUrl;
+      } catch (uploadError) {
+        return res.status(500).json({
+          success: false,
+          error: 'Erro ao processar imagem de perfil',
+          message: 'Não foi possível salvar sua foto de perfil. Por favor, tente novamente.'
+        });
       }
     }
 
-    // Criar usuário NO BANCO
+    // Criar usuário NO BANCO com email verificado como TRUE
     const userToInsert = {
       nome: userData.nome.trim(),
-      sobrenome: userData.sobrenome?.trim() || '',
+      sobrenome: userData.sobrenome.trim(),
       email: userData.email.trim().toLowerCase(),
       senha_hash: hashedPassword,
-      idade: parseInt(userData.idade) || 18,
-      estado: userData.estado?.trim() || '',
+      idade: parseInt(userData.idade, 10),
+      estado: userData.estado.trim(),
       cidade: userData.cidade.trim(),
-      bairro: userData.bairro?.trim() || '',
-      rua: userData.rua?.trim() || '',
-      sexo: userData.sexo || 'Não informado',
-      telefone: userData.telefone?.replace(/\D/g, '') || null,
-      cep: userData.cep?.replace(/\D/g, '') || '',
+      bairro: userData.bairro.trim(),
+      rua: userData.rua.trim(),
+      sexo: userData.sexo,
+      telefone: userData.telefone ? userData.telefone.replace(/\D/g, '') : null,
+      cep: userData.cep.replace(/\D/g, ''),
       aceitou_termos: true,
       imagem_url,
-      email_verified: true,  // ✅ Verificado pela validação robusta
+      // ✅ Email já verificado pela validação robusta
+      email_verified: true,
+      email_verified_at: new Date().toISOString(),
+      email_validation_method: 'robust_validation',
+      email_provider: userData.email.split('@')[1],
+      preferred_language: 'pt-BR',
+      timezone: 'America/Sao_Paulo',
       created_at: new Date().toISOString()
-
     };
 
-    console.log('💾 Salvando usuário no banco...');
     const { data: newUser, error: dbError } = await supabaseAdmin
       .from('usuarios')
       .insert(userToInsert)
@@ -401,7 +401,6 @@ router.post('/', upload.single('foto_perfil'), handleMulterError, async (req, re
       .single();
 
     if (dbError) {
-      console.error('❌ Erro ao salvar no banco:', dbError);
       return res.status(500).json({
         success: false,
         error: 'Erro ao criar conta',
@@ -410,20 +409,6 @@ router.post('/', upload.single('foto_perfil'), handleMulterError, async (req, re
       });
     }
 
-    console.log(`✅ Usuário criado com sucesso! ID: ${newUser.id}`);
-    
-    // 🔥 LOG DE SUCESSO
-    console.log('📊 LOG CADASTRO BEM SUCEDIDO:', {
-      user_id: newUser.id,
-      email: newUser.email,
-      nome: newUser.nome,
-      cidade: newUser.cidade,
-      ip: req.ip,
-      validacao: validacaoEmail.nivel,
-      score_confianca: validacaoEmail.detalhes?.score_confianca,
-      timestamp: new Date().toISOString()
-    });
-    
     // 🔥 RESPOSTA DE SUCESSO
     res.status(201).json({
       success: true,
@@ -435,7 +420,7 @@ router.post('/', upload.single('foto_perfil'), handleMulterError, async (req, re
           imagem_url: newUser.imagem_url,
           cidade: newUser.cidade,
           email_verified: newUser.email_verified,
-          validation_method: newUser.email_validation_method,
+          validation_method: 'robust_validation',
           pode_logar: true
         },
         validacao: {
@@ -455,17 +440,6 @@ router.post('/', upload.single('foto_perfil'), handleMulterError, async (req, re
     });
 
   } catch (error) {
-    console.error('❌ ERRO NO CADASTRO:', error);
-    
-    // Log detalhado do erro
-    console.error('📊 LOG ERRO:', {
-      error: error.message,
-      stack: error.stack,
-      timestamp: new Date().toISOString(),
-      ip: req.ip,
-      email: req.body?.email || 'N/A'
-    });
-    
     res.status(500).json({
       success: false,
       error: 'Erro interno no servidor',
@@ -527,7 +501,7 @@ router.post('/check-email', async (req, res) => {
       });
     }
 
-    // 4. Verificar MX records (opcional - pode ser lento)
+    // 4. Verificar MX records
     let mxValido = false;
     try {
       mxValido = await verificarMXRecords(dominio);
@@ -548,7 +522,6 @@ router.post('/check-email', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Erro na verificação de email:', error);
     res.status(500).json({
       success: false,
       error: 'Erro na verificação'
@@ -579,15 +552,12 @@ router.get('/validation-stats', async (req, res) => {
     };
 
     recentUsers?.forEach(user => {
-      // Método de validação
       const metodo = user.email_validation_method || 'desconhecido';
       stats.metodos_validacao[metodo] = (stats.metodos_validacao[metodo] || 0) + 1;
       
-      // Provedor
       const provedor = user.email_provider || 'desconhecido';
       stats.provedores_top[provedor] = (stats.provedores_top[provedor] || 0) + 1;
       
-      // Hora
       const hora = new Date(user.created_at).getHours();
       stats.hora_pico[hora] = (stats.hora_pico[hora] || 0) + 1;
     });
